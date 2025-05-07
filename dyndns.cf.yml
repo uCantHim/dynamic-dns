@@ -1,0 +1,116 @@
+Parameters:
+  LambdaCodeArchiveKey:
+    Type: String
+
+Resources:
+  # A hosted zone was created by the domain registrar. Creating a new one here
+  # actually creates a second hosted zone with the same name. Let's just leave
+  # the initial zone alone.
+  #
+  #HostedZone:
+  #  Type: AWS::Route53::HostedZone
+  #  Properties:
+  #    Name: !Ref DomainName
+
+  DynDNSHostnameTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: "hostname"
+          AttributeType: S
+      KeySchema:
+        - AttributeName: "hostname"
+          KeyType: HASH
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+        RecoveryPeriodInDays: 5
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: "DynDNSLambdaRole"
+      Description: "Role for the DynamicDNS Lambda function."
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Policies:
+        - PolicyName: "Route53-access"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Resource: "arn:aws:route53:::hostedzone/*"
+                Action:
+                  - "route53:ChangeResourceRecordSets"
+                  - "route53:ListResourceRecordSets"
+        - PolicyName: "S3-access"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Resource:
+                  - !Sub
+                    - "arn:aws:s3:::${BucketName}"
+                    - BucketName: !ImportValue LambdaCodeBucketName
+                  - !Sub
+                    - "arn:aws:s3:::${BucketName}/*"
+                    - BucketName: !ImportValue LambdaCodeBucketName
+                Action:
+                  - "s3:GetObject*"
+                  - "s3:GetBucket*"
+                  - "s3:List*"
+        - PolicyName: "dynamodb-access"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Resource: !GetAtt DynDNSHostnameTable.Arn
+                Action:
+                  - "dynamodb:GetItem"
+                  - "dynamodb:ListTables"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  DynDNSLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Architectures:
+        - arm64
+      Code:
+        S3Bucket: !ImportValue LambdaCodeBucketName
+        S3Key: !Ref LambdaCodeArchiveKey
+      Environment:
+        Variables:
+          ddns_config_table: !Ref DynDNSHostnameTable
+      Handler: "index.lambda_handler"  # 'main' function invoked by lambda.
+      Runtime: python3.13
+      Timeout: 8
+      Role: !GetAtt LambdaRole.Arn
+      LoggingConfig:
+        ApplicationLogLevel: INFO
+        SystemLogLevel: WARN
+        LogFormat: JSON
+
+  DynDNSLambdaUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      Cors:
+        AllowOrigins:
+          - "*"
+      TargetFunctionArn: !Ref DynDNSLambda
+
+  DynDNSLambdaUrlAllowPublicAccess:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DynDNSLambda
+      FunctionUrlAuthType: NONE
+      Action: "lambda:InvokeFunctionUrl"
+      Principal: "*"

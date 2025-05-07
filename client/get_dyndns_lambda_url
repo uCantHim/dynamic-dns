@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+arn=$(aws --profile nicola cloudformation list-stack-resources --stack-name crivellin-dyndns \
+      | jq -r '.StackResourceSummaries[] | select(.LogicalResourceId == "DynDNSLambda") | .PhysicalResourceId')
+url=$(aws --profile nicola lambda get-function-url-config --function-name $arn \
+      | jq -r '.FunctionUrl')
+echo $url

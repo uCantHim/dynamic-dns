@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+set -e
+
+S3_STACK_NAME="crivellin-s3"
+DYNDNS_STACK_NAME="crivellin-dyndns"
+
+aws --profile nicola \
+    cloudformation deploy \
+    --stack-name "$S3_STACK_NAME" \
+    --template-file s3.cf.yml
+
+# We let AWS assign a unique bucket name. Query it now.
+BUCKET_NAME=$(aws --profile nicola cloudformation list-stack-resources --stack-name $S3_STACK_NAME \
+              | jq -r '.StackResourceSummaries[] | select(.LogicalResourceId == "LambdaCodeBucket") | .PhysicalResourceId')
+
+# Now upload lambda code to s3.
+zip -rj lambda-code.zip ./lambda/
+printf -v date '%(%Y-%m-%d_%H:%M:%S)T' -1
+key="dyndns-$date.zip"
+aws --profile nicola s3 cp lambda-code.zip "s3://${BUCKET_NAME}/$key"
+
+# Create the DynDNS stack
+aws --profile nicola \
+    cloudformation deploy \
+    --stack-name "$DYNDNS_STACK_NAME" \
+    --template-file dyndns.cf.yml \
+    --parameter-overrides "LambdaCodeBucketName=$BUCKET_NAME" "LambdaCodeArchiveKey=$key" \
+    --capabilities CAPABILITY_NAMED_IAM
+
+# Remove temporary code storage from S3
+aws --profile nicola s3 rm "s3://${BUCKET_NAME}/$key"

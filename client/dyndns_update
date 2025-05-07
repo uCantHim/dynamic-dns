@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+expect_file () {
+    if [[ ! -f $1 ]]
+    then
+        echo "Expected configuration file $1 to exist. Exiting."
+        exit 1
+    fi
+}
+
+expect_file shared_secret
+expect_file lambda_url
+expect_file ddns_hostname
+
+url=$(cat lambda_url)
+host=$(cat ddns_hostname)
+secret=$(cat shared_secret)
+
+curl --ipv4 -q -s -X POST \
+    -H 'content-type: application/json' \
+    -d '{"execution_mode": "get"}' \
+    $(cat lambda_url) \
+    | python -c 'import json, sys; print(json.load(sys.stdin)["return_message"])' \
+    > current_ip
+ip=$(cat current_ip)
+
+# Post DDNS request
+hash=$(echo -n "$ip$host$secret" | sha256sum | awk '{print $1}')
+echo "My IP: $ip"
+echo "DDNS host: $host"
+echo "Secret: $secret"
+echo "Hash string: $ip$host$secret"
+echo "Hash: $hash"
+curl --ipv4 -q -s -X POST \
+    -H 'content-type: application/json' \
+    -d '{"execution_mode":"set", "validation_hash":"'$hash'","ddns_hostname":"'$host'"}' $url

@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+
+POSITIONAL_ARGS=()
+
+while [[ $# -gt 0 ]]
+do
+    case $1 in
+        --hostname)
+            DDNS_HOSTNAME="$2"
+            shift
+            shift
+            ;;
+        --secret)
+            SECRET="$2"
+            shift
+            shift
+            ;;
+        -*|--*)
+            echo "Unknown option $1"
+            exit 1
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")  # Save positional arg
+            shift
+            ;;
+    esac
+done
+
+set -- "${POSITIONAL_ARGS[@]}"  # Restore positional arguments
+
+# Process positional arguments
+if [[ -z "$1" ]]; then
+    echo "Expected client uri argument, but got none. Exiting."
+    exit 1
+fi
+target="$1"
+
+# Process shared_secret settings
+if [[ -z "$SECRET" ]] && ! ssh $target 'test -e shared_secret'
+then
+    echo "The secret has not yet been configured for this client. Specify with --secret."
+    exit 1
+fi
+
+if [[ -n "$SECRET" ]]
+then
+    echo $SECRET | ssh $target -T 'cat > shared_secret'
+fi
+
+# Process ddns_hostname settings
+if [[ -z "$DDNS_HOSTNAME" ]] && ! ssh $target 'test -e ddns_hostname'
+then
+    echo "DDNS hostname has not yet been configured for this client. Specify with --hostname."
+    exit 1
+fi
+
+if [[ -n "$DDNS_HOSTNAME" ]]
+then
+    echo $DDNS_HOSTNAME | ssh $target -T 'cat > ddns_hostname'
+fi
+
+# Query additional parameters
+./get_dyndns_lambda_url | ssh $target -T 'cat > lambda_url'
+
+# Perform initial ddns update
+scp ./dyndns_update $target:
+ssh $target -T 'bash dyndns_update'

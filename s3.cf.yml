@@ -1,0 +1,24 @@
+# Here's the problem:
+# A lambda's code must be in an S3 bucket. Thus, we can't create the bucket in
+# the same CloudFormation template as the lambda. So we do it here.
+Resources:
+  LambdaCodeBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      #BucketName: !Sub
+      #  - "{Account}-{Region}-{Name}"
+      #  - Account: !Ref AWS::AccountId
+      #  - Region: !Ref AWS::Region
+      #  - Name: !Ref LambdaCodeBucketName
+      AccessControl: Private
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+Outputs:
+  LambdaCodeBucketName:
+    Value: !Ref LambdaCodeBucket
+    Export:
+      Name: LambdaCodeBucketName
