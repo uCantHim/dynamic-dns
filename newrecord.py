@@ -1,12 +1,19 @@
+#!/usr/bin/env python
+
+'''
+Derived from https://github.com/awslabs/route53-dynamic-dns-with-lambda/blob/master/newrecord.py
+
+I didn't like their user interface at all.
+'''
+
 import argparse
 import json
 
 import boto3
 
-DYNAMODB_TABLE_LOGICAL_ID = 'DynDNSHostnameTable'
-
 def main(args):
     stack_name = args.stack_name
+    table_logical_id = args.table_logical_id
 
     cloudformation = boto3.client('cloudformation')
     dynamodb = boto3.client('dynamodb')
@@ -23,12 +30,11 @@ def main(args):
     table = None
     resources = cloudformation.list_stack_resources(StackName=stack_name)
     for resource in resources['StackResourceSummaries']:
-        if resource['LogicalResourceId'] == DYNAMODB_TABLE_LOGICAL_ID:
+        if resource['LogicalResourceId'] == table_logical_id:
             table = resource['PhysicalResourceId']
             break
-
     if table is None:
-        print(f'DynamoDB table with logical ID {DYNAMODB_TABLE_LOGICAL_ID} not found.')
+        print(f'DynamoDB table with logical ID {table_logical_id} not found.')
         exit(1)
 
     hostname = args.hostname
@@ -78,15 +84,37 @@ def main(args):
         TableName=table,
         Key={'hostname': {'S': hostname}}
     )
-    print(f'New table item: {json.loads(resp["Item"]["data"]["S"])}')
+    data = json.loads(resp["Item"]["data"]["S"])
+    data["shared_secret"] = "*" * len(data["shared_secret"])
+    print(f'New table item: {data}')
 
 if __name__ == "__main__":
+    desc = '''Adds an allowed DDNS record to the Lambda's internal database.
+
+Any required variables not specified as options (--hostname, --hostedzone,
+--ttl, --secret) will be queried interactively via STDIN.
+'''
+
     program = argparse.ArgumentParser()
-    program.add_argument('stack_name')
+    program.description = desc
+    program.add_argument(
+        'stack_name',
+        help='Name of a DDNS CloudFormation stack. The new record will be'
+             ' created in this stack\'s DynamoDB table.'
+    )
     program.add_argument('--hostname')
     program.add_argument('--hostedzone')
     program.add_argument('--ttl', type=int)
-    program.add_argument('--secret')
+    program.add_argument('--secret',
+                         help='Secret (a password) shared between the DDNS'
+                              ' client and AWS.')
+    program.add_argument(
+        '--table-logical-id',
+        help='The logical ID of the DNS records table in the specified stack.'
+             ' This is only required when a non-default parameter was used'
+             ' to create the resource/stack.',
+        default='DynDNSHostnameTable'
+    )
     args = program.parse_args()
 
     main(args)
