@@ -1,9 +1,11 @@
 #!/usr/bin/env python
-
 '''
-Derived from https://github.com/awslabs/route53-dynamic-dns-with-lambda/blob/master/newrecord.py
+Inspired by https://github.com/awslabs/route53-dynamic-dns-with-lambda.
 
-I didn't like their user interface at all.
+I didn't like their code and user interface at all, so I rewrote it. This
+version is almost entirely new, but just to be clear: The original file by which
+this code was inspired is licensed under Apache 2.0. See LICENSE-THIRD-PARTY.txt
+for details.
 '''
 
 import argparse
@@ -11,30 +13,34 @@ import json
 
 import boto3
 
+def find_physical_id(stack_name: str, logical_id: str) -> None | object:
+    cloudformation = boto3.client('cloudformation')
+    resources = cloudformation.list_stack_resources(StackName=stack_name)
+    for resource in resources['StackResourceSummaries']:
+        if resource['LogicalResourceId'] == logical_id:
+            return resource['PhysicalResourceId']
+    return None
+
 def main(args):
     stack_name = args.stack_name
-    table_logical_id = args.table_logical_id
 
-    cloudformation = boto3.client('cloudformation')
     dynamodb = boto3.client('dynamodb')
     route53 = boto3.client('route53')
 
-    # Check cloudformation stack exists
+    # Check that the cloudformation stack exists
     try:
+        cloudformation = boto3.client('cloudformation')
         cloudformation.describe_stacks(StackName=stack_name)
     except:
-        print(f"Stack {stack_name} not found, ensure the right AWS CLI profile is being used.")
+        print(f'Stack {stack_name} not found. This can happen when the current'
+              ' AWS CLI profile doesn\'t have the appropriate permissions. Are'
+              ' you using the right profile?')
         exit(1)
 
     # Get dynamodb table name and Lambda Function URL
-    table = None
-    resources = cloudformation.list_stack_resources(StackName=stack_name)
-    for resource in resources['StackResourceSummaries']:
-        if resource['LogicalResourceId'] == table_logical_id:
-            table = resource['PhysicalResourceId']
-            break
+    table = find_physical_id(stack_name, args.table_logical_id)
     if table is None:
-        print(f'DynamoDB table with logical ID {table_logical_id} not found.')
+        print(f'DynamoDB table with logical ID {args.table_logical_id} not found.')
         exit(1)
 
     hostname = args.hostname
@@ -51,7 +57,8 @@ def main(args):
         assert(hz['Name'] == hostedzone or hz['Name'] == hostedzone+'.')
         hostedzone = hz['Id'].split('/')[2]
     except:
-        print("Hosted zone " + hostedzone + " not found.")
+        print(f'Hosted zone {hostedzone} not found.')
+        exit(1)
 
     ttl = args.ttl
     if ttl is None:

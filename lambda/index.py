@@ -1,3 +1,7 @@
+# This file is derived from https://github.com/awslabs/route53-dynamic-dns-with-lambda.
+# Original license: Apache License 2.0
+# See LICENSE-THIRD-PARTY.txt for details.
+#
 # Dynamic DNS via AWS API Gateway, Lambda & Route 53
 # Script variables use lower_case_
 
