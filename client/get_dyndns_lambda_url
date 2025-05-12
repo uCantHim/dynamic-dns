@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 
-arn=$(aws --profile nicola cloudformation list-stack-resources --stack-name crivellin-dyndns \
+if [[ -z "$1" ]]; then
+    echo "Usage: get_dyndns_lambda_url STACK_NAME"
+    exit 1
+fi
+
+arn=$(aws cloudformation list-stack-resources --stack-name $1 \
       | jq -r '.StackResourceSummaries[] | select(.LogicalResourceId == "DynDNSLambda") | .PhysicalResourceId')
-url=$(aws --profile nicola lambda get-function-url-config --function-name $arn \
-      | jq -r '.FunctionUrl')
+url=$(aws lambda get-function-url-config --function-name $arn | jq -r '.FunctionUrl')
 echo $url

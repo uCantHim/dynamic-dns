@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 
+if [[ -z "$CONFIG_DIR" ]]; then
+    CONFIG_DIR="/etc/ddns"
+fi
+
 expect_file () {
     if [[ ! -f $1 ]]
     then
@@ -8,29 +12,24 @@ expect_file () {
     fi
 }
 
-expect_file shared_secret
-expect_file lambda_url
-expect_file ddns_hostname
+expect_file "$CONFIG_DIR/shared_secret"
+expect_file "$CONFIG_DIR/lambda_url"
+expect_file "$CONFIG_DIR/ddns_hostname"
 
-url=$(cat lambda_url)
-host=$(cat ddns_hostname)
-secret=$(cat shared_secret)
+url=$(cat "$CONFIG_DIR/lambda_url")
+host=$(cat "$CONFIG_DIR/ddns_hostname")
+secret=$(cat "$CONFIG_DIR/shared_secret")
 
-curl --ipv4 -q -s -X POST \
+ip=$(curl --ipv4 -q -s -X POST \
     -H 'content-type: application/json' \
     -d '{"execution_mode": "get"}' \
-    $(cat lambda_url) \
-    | python -c 'import json, sys; print(json.load(sys.stdin)["return_message"])' \
-    > current_ip
-ip=$(cat current_ip)
+    $url \
+    | python -c 'import json, sys; print(json.load(sys.stdin)["return_message"])')
+echo "My IP: $ip"
 
 # Post DDNS request
 hash=$(echo -n "$ip$host$secret" | sha256sum | awk '{print $1}')
-echo "My IP: $ip"
-echo "DDNS host: $host"
-echo "Secret: $secret"
-echo "Hash string: $ip$host$secret"
-echo "Hash: $hash"
 curl --ipv4 -q -s -X POST \
     -H 'content-type: application/json' \
     -d '{"execution_mode":"set", "validation_hash":"'$hash'","ddns_hostname":"'$host'"}' $url
+echo ""
