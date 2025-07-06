@@ -48,6 +48,12 @@ fi
 target="$1"
 stack="$2"
 
+# Test connection
+if ! ssh $target -T "echo 42"; then
+    echo "Unable to connect to $target via SSH. Exiting."
+    exit 1
+fi
+
 # Ensure that all required directories exist
 if ! ssh $target -T "test -d $CONFIG_DIR"; then
     ssh $target -T "mkdir -p $CONFIG_DIR"
