@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 
+set -e
+
 # You can change these to fit your configuration.
 #
 # Specify a modified CONFIG_DIR value to the dyndns_update script through an
@@ -8,17 +10,24 @@
 CONFIG_DIR="/etc/ddns"
 BIN_DIR="/usr/local/bin"
 
-# Don't change these.
-secret_file="$CONFIG_DIR/shared_secret"
-lambda_url_file="$CONFIG_DIR/lambda_url"
-ddns_hostname_file="$CONFIG_DIR/ddns_hostname"
+print_usage() {
+    echo "Usage: deploy_client [--domain DOMAIN_NAME] [--stack-name CFN_STACK_NAME] [--secret SECRET] HOST"
+    echo ""
+    echo "Multiple DDNS clients for different domains can be deployed to the"
+    echo "same machine by invoking this deployment script for each of them."
+}
 
 POSITIONAL_ARGS=()
 while [[ $# -gt 0 ]]
 do
     case $1 in
-        --hostname)
-            DDNS_HOSTNAME="$2"
+        --domain)
+            DOMAIN_NAME="$2"
+            shift
+            shift
+            ;;
+        --stack-name)
+            STACK_NAME="$2"
             shift
             shift
             ;;
@@ -41,50 +50,20 @@ done
 set -- "${POSITIONAL_ARGS[@]}"  # Restore positional arguments
 
 # Process positional arguments
-if [[ -z "$1" ]] || [[ -z "$2" ]]; then
-    echo "Usage: deploy_client [OPTIONS] CLIENT STACK_NAME"
+if [[ -z "$1" ]]; then
+    print_usage
     exit 1
 fi
-target="$1"
-stack="$2"
+host="$1"
 
-# Test connection
-if ! ssh $target -T "echo 42"; then
-    echo "Unable to connect to $target via SSH. Exiting."
+# Process required option parameters
+if [[ -z "$DOMAIN_NAME" ]]; then
+    echo "Required option --domain not set. Exiting."
     exit 1
 fi
-
-# Ensure that all required directories exist
-if ! ssh $target -T "test -d $CONFIG_DIR"; then
-    ssh $target -T "mkdir -p $CONFIG_DIR"
-fi
-if ! ssh $target -T "test -d $BIN_DIR"; then
-    ssh $target -T "mkdir -p $BIN_DIR"
-fi
-
-# Process shared_secret settings
-if [[ -z "$SECRET" ]] && ! ssh $target "test -e $secret_file"
-then
-    echo "The secret has not yet been configured for this client. Specify with --secret."
+if [[ -z "$STACK_NAME" ]]; then
+    echo "Required option --stack-name not set. Exiting."
     exit 1
-fi
-
-if [[ -n "$SECRET" ]]
-then
-    echo $SECRET | ssh $target -T "cat > $secret_file"
-    ssh $target -T "chmod 0600 $secret_file"
-fi
-
-# Process ddns_hostname settings
-if [[ -z "$DDNS_HOSTNAME" ]] && ! ssh $target "test -e $ddns_hostname_file"
-then
-    echo "DDNS hostname has not yet been configured for this client. Specify with --hostname."
-    exit 1
-fi
-
-if [[ -n "$DDNS_HOSTNAME" ]]
-then
-    echo $DDNS_HOSTNAME | ssh $target -T "cat > $ddns_hostname_file"
 fi
 
 # Perform some additional checks
@@ -99,23 +78,58 @@ if [[ ! -f ./dyndns_update ]]; then
     exit 1
 fi
 
+# Don't change these.
+secret_file="$CONFIG_DIR/$DOMAIN_NAME/shared_secret"
+lambda_url_file="$CONFIG_DIR/$DOMAIN_NAME/lambda_url"
+ddns_hostname_file="$CONFIG_DIR/$DOMAIN_NAME/ddns_hostname"
+
+# Test connection
+if ! ssh $host -T "echo 42"; then
+    echo "Unable to connect to $host via SSH. Exiting."
+    exit 1
+fi
+
+# Ensure that all required directories exist
+ssh $host -T "mkdir -p $CONFIG_DIR/$DOMAIN_NAME"
+ssh $host -T "mkdir -p $BIN_DIR"
+
+# Process shared_secret settings
+if [[ -z "$SECRET" ]] && ! ssh $host "test -e $secret_file"
+then
+    echo "The secret has not yet been configured for this client. Specify with --secret."
+    exit 1
+fi
+
+if [[ -n "$SECRET" ]]
+then
+    echo $SECRET | ssh $host -T "cat > $secret_file"
+    ssh $host -T "chmod 0600 $secret_file"
+fi
+
+# Configure domain name on the client
+echo $DOMAIN_NAME | ssh $host -T "cat > $ddns_hostname_file"
+
 # Query lambda URL
 echo "Querying DDNS Lambda function URL..."
-if ! lambda_url=$(./get_dyndns_lambda_url $stack); then
+if ! lambda_url=$(./get_dyndns_lambda_url $STACK_NAME); then
     echo "Error when querying the DDNS Lambda function URL. Exiting."
     exit 1
 fi
 echo "Found! Configuring client to call $lambda_url..."
-echo "$lambda_url" | ssh $target -T "cat > $lambda_url_file"
+echo "$lambda_url" | ssh $host -T "cat > $lambda_url_file"
 
 # Install binary and crontab entry
 echo "Installing DDNS update script on the client..."
-scp -q ./dyndns_update "$target:$BIN_DIR/"
+scp -q ./dyndns_update "$host:$BIN_DIR/"
 
 echo "Creating crontab entry on the client (will log to /var/log/ddns_update.log)..."
 cron_entry="*/20 * * * * CONFIG_DIR=$CONFIG_DIR /bin/bash $BIN_DIR/dyndns_update >> /var/log/ddns_update.log"
-ssh $target -T "(crontab -l ; echo '$cron_entry') | crontab -"
+if ! ssh $host -T "crontab -l | grep 'dyndns_update' 1>/dev/null"; then
+    ssh $host -T "(crontab -l ; echo '$cron_entry') | crontab -"
+else
+    echo "Crontab entry already exists. Skipping."
+fi
 
 # Perform initial ddns update
 echo "Performing initial DDNS update on the client..."
-ssh $target -T "CONFIG_DIR=$CONFIG_DIR /bin/bash $BIN_DIR/dyndns_update"
+ssh $host -T "CONFIG_DIR=$CONFIG_DIR /bin/bash $BIN_DIR/dyndns_update"

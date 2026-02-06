@@ -12,24 +12,30 @@ expect_file () {
     fi
 }
 
-expect_file "$CONFIG_DIR/shared_secret"
-expect_file "$CONFIG_DIR/lambda_url"
-expect_file "$CONFIG_DIR/ddns_hostname"
+for dir in $(find "$CONFIG_DIR" -mindepth 1 -maxdepth 1 -type d); do
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] Updating record for domain $(basename $dir)..."
 
-url=$(cat "$CONFIG_DIR/lambda_url")
-host=$(cat "$CONFIG_DIR/ddns_hostname")
-secret=$(cat "$CONFIG_DIR/shared_secret")
+    expect_file "$dir/shared_secret"
+    expect_file "$dir/lambda_url"
+    expect_file "$dir/ddns_hostname"
 
-ip=$(curl --ipv4 -q -s -X POST \
-    -H 'content-type: application/json' \
-    -d '{"execution_mode": "get"}' \
-    $url \
-    | python -c 'import json, sys; print(json.load(sys.stdin)["return_message"])')
-echo "My IP: $ip"
+    url=$(cat "$dir/lambda_url")
+    host=$(cat "$dir/ddns_hostname")
+    secret=$(cat "$dir/shared_secret")
 
-# Post DDNS request
-hash=$(echo -n "$ip$host$secret" | sha256sum | awk '{print $1}')
-curl --ipv4 -q -s -X POST \
-    -H 'content-type: application/json' \
-    -d '{"execution_mode":"set", "validation_hash":"'$hash'","ddns_hostname":"'$host'"}' $url
-echo ""
+    ip=$(curl --ipv4 -q -s -X POST \
+        -H 'content-type: application/json' \
+        -d '{"execution_mode": "get"}' \
+        $url \
+        | python -c 'import json, sys; print(json.load(sys.stdin)["return_message"])')
+    echo "My IP: $ip"
+
+    # Post DDNS request
+    hash=$(echo -n "$ip$host$secret" | sha256sum | awk '{print $1}')
+    curl --ipv4 -q -s -X POST \
+        -H 'content-type: application/json' \
+        -d '{"execution_mode":"set", "validation_hash":"'$hash'","ddns_hostname":"'$host'"}' $url
+
+    echo ""
+    echo ""
+done
